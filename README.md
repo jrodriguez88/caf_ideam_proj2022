@@ -13,7 +13,7 @@ Desarrollo e implementación en IDEAM de un nuevo sistema de predicciones agrocl
 
 * The Alliance of Bioversity International and CIAT [CIAT](https://alliancebioversityciat.org/)
 
-* International Research Institute for Climate and Society [IRI](hhttps://iri.columbia.edu/) 
+* International Research Institute for Climate and Society [IRI](https://iri.columbia.edu/) 
 
 * Instituto de Hidrología, Meteorología y Estudios Ambientales. [IDEAM](http://www.ideam.gov.co/)
 
