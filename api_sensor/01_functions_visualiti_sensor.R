@@ -1,25 +1,33 @@
-### import and read data sensor (soil/rain) - CAF IDEAM project 
+### import and read data sensor (soil/rain Visualiti Sensor) - CAF IDEAM project 
 # Author: Rodriguez-Espinoza J.
 # https://github.com/jrodriguez88/
 # 2022# Read data - Soil moisture sensor
 
 
 ### libraries
-
+library(tidyverse)
+library(tidyr)
+library(dplyr)
+library(stringr)
+library(readr)
+library(purrr)
+library(lubridate)
+library(ggplot2)
+library(data.table)
 
 ## data 
 
 ## read txt files
-path_data <- "data/soil_sensor/"
-files <- list.files(path_data, full.names = T, pattern = ".txt")
+path_data <- "data/soil_sensor/granada/GRANADA/ESTACIÓN NUBIA/M146/"
+files <- list.files(path_data, full.names = T, recursive = T, pattern = ".txt")
 
 ### funcion para importar datos de sensores Visualiti con conexion "Bluetooth Terminal HC-05
 # file = txt file # - Bluetooth Terminal HC-05.txt
 
 import_sensor_data <- function(file){
   
-  tag_ini <- "---INICIO DATOS---"
-  tag_fin <- "---FIN DATOS---"
+  tag_ini <- "---INI"
+  tag_fin <- "---FIN"
   
   
   skip_lines <- read_lines(file) %>% str_detect(tag_ini) %>% which() + 1
@@ -63,33 +71,11 @@ import_sensor_data <- function(file){
     
 }
 
-tttt <- files %>% map(import_sensor_data)  
-  
-  
-  
-import_soil_data <- function(file){
-  
-  tag_ini <- "---INICIO DATOS---"
-  tag_fin <- "---FIN DATOS---"
-  
-  skip_lines <- read_lines(file) %>% str_detect(tag_ini) %>% which() + 1
-  
-  n_lines <- read_lines(file) %>% str_detect(tag_fin) %>% which() - skip_lines - 2
-  
-  raw_data <- fread(file, skip = skip_lines, nrows = n_lines) %>% 
-    set_names(c("id", "date", "Profundidad_0_20cm", "Profundidad_20_40cm")) %>%
-    mutate(date_time = as_datetime(date), hour = format(date_time, "%H"), 
-           date = as_date(date_time)) %>% 
-    dplyr::select(id, date_time, date, hour, everything())
-  
-  
- return(raw_data) 
-  
-}
+# Funciones que convuertes datos crudos de sensores en datos diarios
 
 soilraw_to_daily <- function(soilraw_data, nmin = 12){
   
-  daily_data_soil <- soilraw_data %>% group_by(id, date) %>% 
+  daily_data_soil <- soilraw_data %>% distinct() %>% group_by(id, date) %>% 
     summarise(n = n(), 
               Profundidad_0_20cm = mean(sensor_humedad_1, na.rm = T), 
               Profundidad_20_40cm = mean(sensor_humedad_2, na.rm = T)) %>%
@@ -105,14 +91,17 @@ soilraw_to_daily <- function(soilraw_data, nmin = 12){
 
 rainraw_to_daily <- function(rainraw_data){
   
-  rain_daily_data <- rainraw_data %>% 
+  rain_daily_data <- rainraw_data %>% distinct() %>%
     group_by(id, date) %>% 
     summarise(n = n(), Precipitacion = sum(pluviometro_1, na.rm = T)) %>%
-    ungroup()
+    ungroup() ## add distinct data
   
   return(rain_daily_data)
   
 }
+
+
+# Funciones para graficar datos de sensores
 
 plot_soil_data <- function(soil_daily_data) {
   
@@ -182,60 +171,26 @@ return(plot_pluvio)
 }
 
 
+# prueba de uso - precipitacion
+
+test_data <- files %>% map(import_sensor_data) 
+
+test_data %>% bind_rows() %>% 
+ # distinct() %>% 
+  rainraw_to_daily %>% slice(-c(1,2)) %>% 
+  plot_rain_data() %>% 
+  plotly::ggplotly()
 
 
+# prueba de uso - Suelo
 
-bruselas <- files[[1]] %>% import_sensor_data() %>%
-  soilraw_to_daily() %>%
-  plot_soil_data()
+test_data <- files %>% map(import_sensor_data) 
 
-bruselas %>% ggplotly()
-
-
-a <- files %>% map(import_sensor_data)
-
-
-path_data <- "data/soil_sensor/"
-files <- list.files(path_data, full.names = T)
-
-
-plotly::ggplotly(bruselas)
-
-files[1] %>% import_sensor_data() %>%
-  rainraw_to_daily %>% filter(date >= mean(l$date))
-  plot_rain_data
-
-
-files <- list.files("data/soil_sensor/puerto_lopez/2/LA COQUERA/", full.names = T, pattern = ".txt")
-
-files[1] %>% import_sensor_data() %>%
-  soilraw_to_daily()%>%
-  plot_soil_data()
-
-
-files[2] %>% import_sensor_data() %>%
-rainraw_to_daily() %>%
-  plot_rain_data()
-
-library(gridExtra)
-grid.arrange(plot_pluvio, plot_sensor, ncol=1)
-
-plotly::ggplotly(plot_sensor)
-
-
-
-list.files("data/", pattern = ".txt", full.names = T) %>%
-  import_sensor_data() %>%
-  soilraw_to_daily()%>%
-  plot_soil_data()
-
-
-a %>% 
- map( rainraw_to_daily) %>%
-  map(plot_rain_data)
-
-
-
+test_data %>% bind_rows() %>%# View()
+  # distinct() %>% 
+  soilraw_to_daily %>% #slice(-c(1:44)) %>% 
+  plot_soil_data() %>% 
+  plotly::ggplotly()
 
 
 
