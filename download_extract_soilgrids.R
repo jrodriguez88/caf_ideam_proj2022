@@ -22,9 +22,9 @@ COL2_shp <- getData('GADM', country='COL', level=2) %>% st_as_sf()
 dptos_select <- COL_shp %>% 
   dplyr::filter(HASC_1 %in% c("CO.SU", "CO.ME", "CO.CO", "CO.TO"))
 
-municipios_select <- COL2_shp %>% 
+municipios_select <- COL2_shp %>% # Cotorra no existe en este shp
   dplyr::filter(HASC_2 %in% c("CO.SU.SB", "CO.SU.SM", "CO.ME.PZ","CO.ME.GR", 
-                              "CO.CO.CE","CO.CO.CT", "CO.TO.AR", "CO.TO.ES")) 
+                              "CO.CO.CE","CO.CO.CT", "CO.TO.AR", "CO.TO.ES"))
 
 
 
@@ -33,6 +33,16 @@ igh <- '+proj=igh +lat_0=0 +lon_0=0 +datum=WGS84 +units=m +no_defs'
 crop_layer_col <- st_transform(dptos_select, igh)
 bbox_col <- st_bbox(crop_layer_col)
 limites_layer_col <- c(bbox_col$xmin, bbox_col$ymax, bbox_col$xmax, bbox_col$ymin)
+
+## leer shapefile de otra fuente
+municipios_select <- st_read("data/spatial/mpios_select.shp") %>%
+  st_set_crs(., 6269) %>% st_transform(igh) %>%  ##Transformacion CRC por magna sirgas
+  mutate(NOM_DEPART = str_to_title(NOM_DEPART),
+         mpio = str_to_title(NOM_MUNICI)) %>% 
+  rename(name =  NOM_DEPART) %>% dplyr::select(name, mpio, Cultivo, geometry) %>%  
+  mutate(lat = map_dbl(geometry, ~st_coordinates(st_centroid(.x))[[1]][1]),
+         lon = map_dbl(geometry, ~st_coordinates(st_centroid(.x))[[2]][1])) %>% #set_names(c("name", "mpio", "cultivar", "geometry", "x", "y"))
+  nest(mpios_shp = -name) 
 
 
 
@@ -64,18 +74,6 @@ map2(soilgrids_urls, names_files_soil,
 
 
 
-
-
-shape_crop_co <- crop_layer_col %>% group_split(HASC_1)
-test_municipios_select <- st_transform(municipios_select, igh) %>% 
-  filter(str_detect(HASC_2, "CO.CO"))
-
-
-dptos_caf_soilgrids <- map(shape_crop_co, 
-                           raster %>%
-                             crop(test_crop_co) %>% 
-                             mask(test_crop_co))
-
 ### Calcula el promedio por variable (0 - 60 cm profundidad)
 
 raster_mean60 <- map(soil_vars, ~str_subset(paste0("soilgrids/", names_files_soil), .x) %>%
@@ -84,17 +82,14 @@ raster_mean60 <- map(soil_vars, ~str_subset(paste0("soilgrids/", names_files_soi
                      calc(mean))
 
 
-dpto_shp <- shape_crop_co %>% enframe(name = "dpto") %>%
-  mutate(name = map_chr(value, ~.x$NAME_1 )) %>%
-  dplyr::select(name, value)  %>% rename(dpto_shp = value)
-
 
 var_raster <- raster_mean60 %>%  set_names(soil_vars) %>% 
   enframe(name = "var", value = "raster")
 ## Tidy data
 
 
-test_data_soil <- shape_crop_co %>% enframe(name = "dpto") %>%
+test_data_soil <- crop_layer_col %>% group_split(HASC_1) %>% 
+  enframe(name = "dpto") %>%
   mutate(name = map_chr(value, ~.x$NAME_1 )) %>%
   dplyr::select(name, value)  %>% rename(dpto_shp = value) %>%
   mutate(var_raster  = list(var_raster)) %>% unnest(var_raster) %>% 
@@ -119,15 +114,16 @@ soilgris_description <- soil_units[[1]] %>%
 
 
 ## Convierte raster -selection en puntos
-soilgrids_data_points <- test_data_soil %>% 
+soilgrids_data_points <- test_data_soil %>% left_join(municipios_select) %>%
   left_join(soilgris_description) %>% 
   mutate(soil_raster_points = map2(plot_raster, factor, 
                                    ~((.x)/(.y)) %>% 
                                      raster::as.data.frame(., xy = T)))
 
-
+library("ggrepel")
 ## Funcion para graficar datos soilgrids por departamento 
-plot_soilgrids <- function(var, soil_raster_points, description, dpto_shp, units) {
+plot_soilgrids <- function(var, soil_raster_points, description, dpto_shp, mpios_shp, units) {
+  
   
   dpto <- dpto_shp$NAME_1[[1]]
   title_plot <- paste0("Departamento de ", dpto)
@@ -140,6 +136,10 @@ plot_soilgrids <- function(var, soil_raster_points, description, dpto_shp, units
     ggplot() + 
     geom_raster(aes(x=x, y=y, fill = layer)) +
     geom_sf(data = dpto_shp, alpha = 0, fill = "transparent") +
+    geom_sf(data = mpios_shp, fill = "transparent", color = "darkred" ) +
+    geom_text_repel(data = mpios_shp, aes(lat, lon, label = mpio), 
+                    fontface = "bold", nudge_x = c(1, 1), 
+                    nudge_y = c(0.5, 0.5 )) + 
     labs(title = title_plot,
          subtitle = sub_plot,
          caption = capt_plot,
@@ -157,26 +157,65 @@ plot_soilgrids <- function(var, soil_raster_points, description, dpto_shp, units
 
 
 plots_soilgrids <- soilgrids_data_points %>%
-  dplyr::select(var, soil_raster_points, description, dpto_shp, units)  %>% 
+  dplyr::select(var, soil_raster_points, description, dpto_shp, mpios_shp, units)  %>% 
   mutate(plot = pmap(., plot_soilgrids))
 
 #p22 <- plots_soilgrids$plot[[1]]
 #ggplotly(p22)
 
 ## save plots 
-walk2(paste0(soil_data_final$tag_name, ".png"), plots_soilgrids$plot, 
+walk2(paste0("outputs/", soil_data_final$tag_name, ".png"), plots_soilgrids$plot, 
       ~ggsave(filename = .x, plot = .y, units = "mm", height = 125, width = 180))
 
 
+save(soilgrids_data_points, file = "datos_soilgrids_to_plot.RData")
+
+## calcula textura
+
+test_texture <- soilgrids_data_points %>% dplyr::select(name, var, soil_raster_points) %>% 
+  dplyr::filter(var %in% c("clay", "sand")) %>% unnest(soil_raster_points) %>% drop_na(layer) %>%
+  nest(data = -c(name, x, y ))
+
+
+cal_texture <- function(clay_sand_data) {
+  
+  
+  clay_sand_data %>%
+    mutate(texture = map_chr(data, 
+                             ~.x  %>% 
+                               pivot_wider(names_from = var, values_from = layer) %>%
+                               mutate(texture = get_STC(sand, clay)) %>%
+                               pull(texture)))
+  
+  
+}
+
+
+library(foreach)
+library(parallel)
+library(iterators)
+library(doParallel)
+
+
+ncores <- detectCores()/2
+registerDoParallel(ncores)
+
+
+texture_points_class <- foreach(
+  i = test_texture %>% group_split(name), 
+  .export=c('test_texture', 'get_STC', 'cal_texture'), 
+  .packages=c('tidyverse', 'soiltexture')) %dopar% {
+    cal_texture(i)
+  }
+
+closeAllConnections()
+
+clay_sand_data %>% cal_texture()
+
+  
 
 
 
 
-
-
-
-
-
-
-
-
+test_texture %>% group_split(name)
+         

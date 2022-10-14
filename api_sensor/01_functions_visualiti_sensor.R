@@ -5,7 +5,7 @@
 
 
 ### libraries
-library(tidyverse)
+#library(tidyverse)
 library(tidyr)
 library(dplyr)
 library(stringr)
@@ -14,11 +14,12 @@ library(purrr)
 library(lubridate)
 library(ggplot2)
 library(data.table)
+library(plotly)
 
 ## data 
 
-## read txt files
-path_data <- "data/soil_sensor/granada/GRANADA/ESTACIÓN NUBIA/M146/"
+## read txt files ---> ubicar la carpeta con los archivos txt descargados del sensor
+path_data <- "data/soil_sensor/test/"
 files <- list.files(path_data, full.names = T, recursive = T, pattern = ".txt")
 
 ### funcion para importar datos de sensores Visualiti con conexion "Bluetooth Terminal HC-05
@@ -49,8 +50,9 @@ import_sensor_data <- function(file){
     raw_data <- raw_data %>%
       set_names(new_names) %>%
       mutate(date_time = as_datetime(date), hour = format(date_time, "%H"), 
-             date = as_date(date_time)) %>% 
-      dplyr::select(id, date_time, date, hour, everything())
+             date = as_date(date_time),
+             var  = "soil") %>% 
+      dplyr::select(id, var, date_time, date, hour, everything())
     
   } else if ("mm"  %in% var_names) {
     
@@ -60,28 +62,28 @@ import_sensor_data <- function(file){
     raw_data <- raw_data %>%
       set_names(new_names) %>%
       mutate(date_time = as_datetime(date), 
-             date = as_date(date_time)) %>% 
-      dplyr::select(id, date_time, date, everything())
+             date = as_date(date_time),
+             var = "rain") %>% 
+      dplyr::select(id, var, date_time, date, everything())
     
     
   } else {cat("No se identifican datos")}
-
+  
   
   return(raw_data)
-    
-}
-
-# Funciones que convuertes datos crudos de sensores en datos diarios
+  
+} 
+# Funciones que convierten datos crudos de sensores en datos diarios
 
 soilraw_to_daily <- function(soilraw_data, nmin = 12){
   
   daily_data_soil <- soilraw_data %>% distinct() %>% group_by(id, date) %>% 
     summarise(n = n(), 
-              Profundidad_0_20cm = mean(sensor_humedad_1, na.rm = T), 
-              Profundidad_20_40cm = mean(sensor_humedad_2, na.rm = T)) %>%
+              Profundidad_0_20cm = mean(sensor_humedad_2, na.rm = T), 
+              Profundidad_20_40cm = mean(sensor_humedad_1, na.rm = T)) %>%
     ungroup() %>% 
     filter(n>=nmin) %>% 
-    pivot_longer(cols = -c(id, date, n), names_to = "Humedad_del_Suelo")# minimo % de los datos colectados por dia
+    pivot_longer(cols = -c(id, date, n), names_to = "Humedad_del_Suelo") # minimo % de los datos colectados por dia
   
   
   return(daily_data_soil)
@@ -107,7 +109,7 @@ plot_soil_data <- function(soil_daily_data) {
   
   plot_sensor <- soil_daily_data %>% ggplot() +
     geom_line(aes(date, value, color = Humedad_del_Suelo), cex = 1.1) +
-    ylim(3, 60) + scale_x_date(date_breaks = "2 day", date_labels = "%b %d") +
+    ylim(3, 60) + scale_x_date(date_breaks = "7 day", date_labels = "%b %d") +
     geom_hline(aes(yintercept=4, linetype = "Punto de Marchitez Permanente"), colour = "red") + 
     geom_hline(aes(yintercept=10, linetype = "Punto de Marchitez Permanente"), colour = "red") + 
     geom_hline(aes(yintercept=17, linetype = "Punto de Marchitez Permanente"), colour = "red") + 
@@ -150,7 +152,7 @@ plot_rain_data <- function(rain_daily_data){
   
   plot_pluvio <- rain_daily_data %>% ggplot() +
     geom_col(aes(date, Precipitacion), color = "blue", width = 0.5, fill = "lightblue") +
-    scale_x_date(date_breaks = "2 day", date_labels = "%b %d") +
+    scale_x_date(date_breaks = "7 day", date_labels = "%b %d") +
     labs(title = paste0("Registro de lluvias del sensor ", rain_daily_data$id[[1]]),
          #        subtitle = "30-year Data 1990-2019 \nCrop Season:  A = May-Apr  --  B = Sep-Oct",
          x= "Dia",
@@ -171,26 +173,30 @@ return(plot_pluvio)
 }
 
 
-# prueba de uso - precipitacion
-
-test_data <- files %>% map(import_sensor_data) 
-
-test_data %>% bind_rows() %>% 
- # distinct() %>% 
-  rainraw_to_daily %>% slice(-c(1,2)) %>% 
-  plot_rain_data() %>% 
-  plotly::ggplotly()
+# prueba de uso - precipitacion -- lectura datos crudos
+test_data <- files %>% map(import_sensor_data) %>% 
+  map(~.x %>% nest(raw_data = -c(var))) %>% bind_rows()
 
 
-# prueba de uso - Suelo
 
-test_data <- files %>% map(import_sensor_data) 
+# Definir fecha inicial de filtro, en algunos casos se registran datos con fechas anteriores ( 2000)
+ini_date <- make_date(2022, 3, 20)
 
-test_data %>% bind_rows() %>%# View()
-  # distinct() %>% 
-  soilraw_to_daily %>% #slice(-c(1:44)) %>% 
-  plot_soil_data() %>% 
-  plotly::ggplotly()
+
+## Datos precipitacion diarios
+
+rain <- test_data %>% filter(var == "rain") %>% unnest(raw_data) %>% 
+  group_split(id) %>% map(rainraw_to_daily) %>% 
+  map(~.x %>% filter(date > ini_date))
+
+
+## datos humedad de  suelo
+soil <- test_data %>% filter(var == "soil") %>% unnest(raw_data) %>% 
+  group_split(id)  %>% map(~soilraw_to_daily(.x) %>% 
+  filter(date > ini_date)) 
+
+
+#### graficar datos --->
 
 
 

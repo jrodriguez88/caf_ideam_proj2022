@@ -32,7 +32,7 @@ sites <- read_excel("data/IDH/estaciones_extract.xlsx") #%>%
 
 
 # read idh raster data
-idh_raster_tib <- files %>% 
+idh_raster_raw<- files %>% 
   mutate(idh_raster = map(path, raster))
   
 
@@ -75,8 +75,23 @@ save(files, sites, idh_raster_raw, idh_caf_points_stations, file = "IDH_Ideam_da
 
 idh_caf_points_stations %>% 
   dplyr::select(Station_Name, data_idh) %>%
-  unnest(data_idh) %>% pivot_wider(names_from = Station_Name, values_from = idh) %>%
-  write_csv(file = "IDH_Ideam_stations.csv")
+  unnest(data_idh) %>% pivot_wider(names_from = Station_Name, values_from = idh) %>% mutate(across(year, month), as.numeric)
+  write_csv(file = "IDH_Ideam_stations2.csv")
 
+
+
+idh_caf_points_stations %>% 
+  dplyr::select(Station_Name, Departamento, data_idh) %>%
+  unnest(data_idh) %>% mutate(year = as.numeric(year), month = as.numeric(month)) %>%
+ # mutate(month = factor(month, levels = 1:12)) %>%
+  ggplot() +
+  geom_boxplot(aes(month, idh, fill = Departamento, group = interaction(Departamento, month))) +
+  theme_bw() + 
+  scale_x_continuous(labels = function(x) month.abb[x], breaks = 1:12) +
+  labs(title = "IDH historico mensual",
+       subtitle = "Fuente: Ideam")
+  
 
   
+
+load("IDH_Ideam_data.RData")
